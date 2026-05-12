@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dostt-backend
+  namespace: default
+  labels:
+    app: dostt-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dostt-backend
+  template:
+    metadata:
+      labels:
+        app: dostt-backend
+    spec:
+      containers:
+        - name: backend
+          image: dostt-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3001
+          envFrom:
+            - configMapRef:
+                name: dostt-rewards-config
+            - secretRef:
+                name: dostt-rewards-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

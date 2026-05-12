@@ -52,14 +52,14 @@ async function api(path, options = {}) {
     ...options,
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Request failed");
+  if (!res.ok) throw Object.assign(new Error(data.error || "Request failed"), { status: res.status, data });
   return data;
 }
 
 const TEST_PHONES = ["9500365660"];
 
 const state = {
-  view: "login",      // "login" | "rewards" | "terms"
+  view: "login",
   prevView: "login",
   phone: "",
   country: COUNTRIES[0],
@@ -71,11 +71,60 @@ const state = {
   claimed: new Set(),
   toast: "",
   loading: false,
-  testMode: null,        // null | "api" | "bypass"
+  // tester state
+  isTester: false,
+  testMode: null,        // null | "api" | "direct_select" | "bypass"
+  claimType: "real",     // "real" | "dummy"
   showTestModal: false,
+  // cooldown
+  nextClaimAt: null,     // ISO string — when next claim becomes available
 };
 
 const root = document.getElementById("root");
+
+// ─── Countdown timer ─────────────────────────────────────────────────────────
+
+let _countdownInterval = null;
+
+function startCountdown() {
+  clearInterval(_countdownInterval);
+  if (!state.nextClaimAt) return;
+
+  _countdownInterval = setInterval(() => {
+    const secsLeft = Math.max(0, Math.ceil((new Date(state.nextClaimAt) - Date.now()) / 1000));
+
+    if (secsLeft === 0) {
+      state.nextClaimAt = null;
+      clearInterval(_countdownInterval);
+      _countdownInterval = null;
+      // Re-render to restore Claim buttons
+      render();
+      initLottie();
+      return;
+    }
+
+    const mins = String(Math.floor(secsLeft / 60)).padStart(2, "0");
+    const secs = String(secsLeft % 60).padStart(2, "0");
+    document.querySelectorAll(".cooldown-timer").forEach(el => {
+      el.textContent = `${mins}:${secs}`;
+    });
+  }, 1000);
+}
+
+function secsUntilClaim() {
+  if (!state.nextClaimAt) return 0;
+  return Math.max(0, Math.ceil((new Date(state.nextClaimAt) - Date.now()) / 1000));
+}
+
+function cooldownLabel() {
+  const s = secsUntilClaim();
+  if (s <= 0) return null;
+  const mins = String(Math.floor(s / 60)).padStart(2, "0");
+  const secs = String(s % 60).padStart(2, "0");
+  return `${mins}:${secs}`;
+}
+
+// ─── Country sheet ────────────────────────────────────────────────────────────
 
 function countrySheet() {
   const query = state.countrySearch.toLowerCase();
@@ -107,6 +156,8 @@ function countrySheet() {
     </div>
   `;
 }
+
+// ─── Login page ───────────────────────────────────────────────────────────────
 
 function loginPage() {
   return `
@@ -150,7 +201,6 @@ function loginPage() {
   `;
 }
 
-
 function wireLoginEvents() {
   const loginBtn = document.getElementById("login-btn");
   if (!loginBtn) return;
@@ -161,7 +211,6 @@ function wireLoginEvents() {
     if (phone.length < 7) { input.focus(); return; }
 
     state.phone = phone;
-
     loginBtn.disabled = true;
     loginBtn.textContent = "Logging in…";
 
@@ -171,7 +220,9 @@ function wireLoginEvents() {
         body: JSON.stringify({ phone, countryCode: state.country.code }),
       });
       localStorage.setItem("dostt_session", JSON.stringify({ phone, country: state.country }));
-      if (TEST_PHONES.includes(phone)) {
+      state.isTester = data.isTester || false;
+
+      if (state.isTester) {
         state.testMode = null;
         state.showTestModal = true;
         render();
@@ -180,6 +231,7 @@ function wireLoginEvents() {
         rewardsRendered = false;
         await loadRewardsData();
         render();
+        if (state.nextClaimAt) startCountdown();
       }
     } catch (err) {
       showLoginError(err.message);
@@ -196,7 +248,6 @@ function wireLoginEvents() {
     });
   }
 
-  // Country picker
   document.getElementById("country-picker-btn")?.addEventListener("click", () => {
     state.showCountrySheet = true;
     state.countrySearch = "";
@@ -215,7 +266,6 @@ function wireCountrySheetEvents() {
 
   document.getElementById("country-search")?.addEventListener("input", (e) => {
     state.countrySearch = e.target.value;
-    // Re-render just the list area
     const sheet = document.getElementById("country-sheet");
     if (!sheet) return;
     const query = state.countrySearch.toLowerCase();
@@ -260,6 +310,99 @@ function showLoginError(msg) {
   err.textContent = msg;
 }
 
+// ─── Test mode modal ──────────────────────────────────────────────────────────
+
+function testModeModal() {
+  return `
+    <div id="test-modal-overlay" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-6">
+      <div class="w-full max-w-sm rounded-2xl bg-[#161d2a] border border-white/10 p-6">
+        <div class="mb-1 flex items-center gap-2">
+          <span class="text-lg">🧪</span>
+          <h2 class="text-base font-semibold text-white">Tester Mode</h2>
+        </div>
+        <p class="mb-5 text-xs text-white/50">You're logged in with a test number. Choose how you want to test:</p>
+        <div class="flex flex-col gap-3">
+          <button id="test-api-btn" class="w-full rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 py-3.5 text-sm font-semibold text-white shadow-[0_4px_20px_rgba(139,92,246,0.35)] active:opacity-90 text-left px-4">
+            Test via API
+            <p class="text-[11px] font-normal opacity-70 mt-0.5">Hits backend · saves to DB · normal points check</p>
+          </button>
+          <button id="test-direct-btn" class="w-full rounded-xl border border-violet-400/40 bg-violet-400/10 py-3.5 text-sm font-semibold text-white active:opacity-90 text-left px-4">
+            Direct Select via API
+            <p class="text-[11px] font-normal opacity-70 mt-0.5">All tiers unlocked · hits backend · saves to DB</p>
+          </button>
+          <button id="test-bypass-btn" class="w-full rounded-xl border border-white/15 bg-white/6 py-3.5 text-sm font-semibold text-white active:opacity-90 text-left px-4">
+            Test Offline (Bypass)
+            <p class="text-[11px] font-normal opacity-70 mt-0.5">No API · no DB · resets on logout</p>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function wireTestModal() {
+  document.getElementById("test-api-btn")?.addEventListener("click", async () => {
+    state.testMode = "api";
+    state.showTestModal = false;
+    state.view = "rewards";
+    rewardsRendered = false;
+    await loadRewardsData();
+    render();
+    if (state.nextClaimAt) startCountdown();
+  });
+
+  document.getElementById("test-direct-btn")?.addEventListener("click", async () => {
+    state.testMode = "direct_select";
+    state.showTestModal = false;
+    state.view = "rewards";
+    state.totalSpent = 24350; // all tiers visible immediately
+    rewardsRendered = false;
+    await loadRewardsData();
+    render();
+    if (state.nextClaimAt) startCountdown();
+  });
+
+  document.getElementById("test-bypass-btn")?.addEventListener("click", () => {
+    state.testMode = "bypass";
+    state.showTestModal = false;
+    state.view = "rewards";
+    state.totalSpent = 24350;
+    state.claimed = new Set();
+    rewardsRendered = false;
+    render();
+  });
+}
+
+// ─── Tester toolbar (shown on rewards page when isTester) ────────────────────
+
+function testerToolbar() {
+  const modeLabel = {
+    api: "API Mode",
+    direct_select: "Direct Select",
+    bypass: "Offline Bypass",
+  }[state.testMode] || "?";
+
+  const isDummy = state.claimType === "dummy";
+
+  return `
+    <div class="mx-3 mt-3 rounded-2xl border border-amber-400/30 bg-amber-400/8 px-4 py-2.5 flex items-center gap-3 flex-wrap">
+      <span class="text-xs font-semibold text-amber-300">🧪 Tester</span>
+      <span class="text-xs text-white/50 border-r border-white/15 pr-3">${modeLabel}</span>
+      <div class="flex items-center gap-2 ml-auto">
+        <span class="text-xs text-white/50">Claim:</span>
+        <button id="claim-type-toggle"
+          class="rounded-full px-3 py-1 text-xs font-semibold transition-colors ${isDummy
+            ? "bg-amber-400/20 text-amber-300 border border-amber-400/40"
+            : "bg-violet-500/20 text-violet-300 border border-violet-400/40"
+          }">
+          ${isDummy ? "Dummy" : "Real"}
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+// ─── Progress helpers ─────────────────────────────────────────────────────────
 
 function nextThreshold(totalSpent) {
   const next = TIER_DATA.find((t) => totalSpent < t.unlockAt);
@@ -282,10 +425,14 @@ function progressWindow(totalSpent) {
   };
 }
 
+// ─── Tier card ────────────────────────────────────────────────────────────────
+
 function tierCard(tier, isNextUp = false) {
   const isClaimed = state.claimed.has(tier.id);
-  const claimable = state.totalSpent >= tier.unlockAt && !isClaimed;
-  const locked = state.totalSpent < tier.unlockAt;
+  const isDirectSelect = state.testMode === "direct_select";
+  const claimable = (state.totalSpent >= tier.unlockAt || isDirectSelect) && !isClaimed;
+  const locked = !claimable && !isClaimed;
+  const onCooldown = claimable && secsUntilClaim() > 0;
 
   const shellClass = locked
     ? "border border-white/10 bg-white/5 opacity-75"
@@ -293,11 +440,26 @@ function tierCard(tier, isNextUp = false) {
       ? "border border-violet-300/60 bg-gradient-to-br from-violet-400/20 to-purple-500/20"
       : "border border-white/8 bg-white/4 opacity-50";
 
-  const buttonClass = locked
-    ? "bg-white/20 text-white/60 cursor-not-allowed"
-    : claimable
-      ? "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-[0_0_12px_rgba(139,92,246,0.5)]"
-      : "bg-white/15 text-white/40 cursor-not-allowed";
+  let buttonContent, buttonClass, buttonDisabled;
+
+  if (isClaimed) {
+    buttonContent = "Claimed";
+    buttonClass = "bg-white/15 text-white/40 cursor-not-allowed";
+    buttonDisabled = true;
+  } else if (locked) {
+    buttonContent = "Claim";
+    buttonClass = "bg-white/20 text-white/60 cursor-not-allowed";
+    buttonDisabled = true;
+  } else if (onCooldown) {
+    // Show live countdown — the setInterval will update .cooldown-timer spans
+    buttonContent = `<span class="cooldown-timer">${cooldownLabel()}</span>`;
+    buttonClass = "bg-white/10 text-white/50 cursor-not-allowed";
+    buttonDisabled = true;
+  } else {
+    buttonContent = "Claim";
+    buttonClass = "bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-[0_0_12px_rgba(139,92,246,0.5)]";
+    buttonDisabled = false;
+  }
 
   let dotClass, dotContent;
   if (isClaimed) {
@@ -325,9 +487,9 @@ function tierCard(tier, isNextUp = false) {
             <button
               class="claim-btn min-w-[86px] rounded-full px-4 py-2 text-xs font-semibold ${buttonClass}"
               data-tier="${tier.id}"
-              ${locked || isClaimed ? "disabled" : ""}
+              ${buttonDisabled ? "disabled" : ""}
             >
-              ${isClaimed ? "Claimed" : "Claim"}
+              ${buttonContent}
             </button>
           </div>
         </div>
@@ -336,12 +498,24 @@ function tierCard(tier, isNextUp = false) {
   `;
 }
 
+// ─── Rewards page ─────────────────────────────────────────────────────────────
+
 function rewardsPage() {
+  const isDirectSelect = state.testMode === "direct_select";
+  const effectiveTotalSpent = isDirectSelect ? 24350 : state.totalSpent;
+
   const firstUnclaimed = TIER_DATA.find(t => !state.claimed.has(t.id));
   const firstUnclaimedId = firstUnclaimed ? firstUnclaimed.id : null;
   const target = firstUnclaimed ? firstUnclaimed.unlockAt : TIER_DATA[TIER_DATA.length - 1].unlockAt;
-  const displayed = Math.min(state.totalSpent, target);
-  const ratio = Math.min((state.totalSpent / target) * 100, 100);
+  const displayed = Math.min(effectiveTotalSpent, target);
+  const ratio = Math.min((effectiveTotalSpent / target) * 100, 100);
+
+  const cooldownBanner = secsUntilClaim() > 0 ? `
+    <div class="mx-3 mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 flex items-center gap-2.5">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" class="shrink-0 text-white/50"><circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.3"/><path d="M7 4v3l2 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      <p class="text-xs text-white/60">Next claim available in <span class="cooldown-timer font-semibold text-white/80">${cooldownLabel()}</span></p>
+    </div>
+  ` : "";
 
   return `
     <div class="mx-auto w-full max-w-md h-[100svh] overflow-y-auto bg-noise">
@@ -357,6 +531,9 @@ function rewardsPage() {
         </div>
       </header>
 
+      ${state.isTester ? testerToolbar() : ""}
+      ${cooldownBanner}
+
       <section class="mx-3 mt-4 rounded-3xl border border-white/10 bg-[#1a2230] p-5 shadow-soft progress-card">
         <div class="lottie-wrap">
           <div id="coins-lottie" class="lottie-canvas" aria-hidden="true"></div>
@@ -365,9 +542,9 @@ function rewardsPage() {
           <div class="flex items-center justify-between">
             <p class="text-[11px] uppercase tracking-widest text-white/60">Your Progress</p>
             <div class="flex flex-col items-end gap-0.5">
-            <p class="text-[10px] text-white/45">${state.lastRefreshedAt ? "Last updated: " + new Date(state.lastRefreshedAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) + " IST" : "Refreshes every 2 hours"}</p>
-            ${state.cycleEndDate ? `<p class="text-[10px] text-dosttGold/80">Resets in ${Math.max(0, Math.ceil((new Date(state.cycleEndDate) - Date.now()) / (1000 * 60 * 60 * 24)))} days</p>` : ""}
-          </div>
+              <p class="text-[10px] text-white/45">${state.lastRefreshedAt ? "Last updated: " + new Date(state.lastRefreshedAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" }) + " IST" : "Refreshes every 2 hours"}</p>
+              ${state.cycleEndDate ? `<p class="text-[10px] text-dosttGold/80">Resets in ${Math.max(0, Math.ceil((new Date(state.cycleEndDate) - Date.now()) / (1000 * 60 * 60 * 24)))} days</p>` : ""}
+            </div>
           </div>
           <p class="mt-1 text-xl font-semibold">${displayed} / ${target} Dostt Points earned</p>
         </div>
@@ -434,6 +611,8 @@ function rewardsPage() {
   `;
 }
 
+// ─── Terms page ───────────────────────────────────────────────────────────────
+
 function termsPage() {
   return `
     <div class="mx-auto flex h-[100svh] w-full max-w-md flex-col bg-noise">
@@ -450,7 +629,7 @@ function termsPage() {
 
         <section>
           <h2 class="text-sm font-semibold text-white mb-2">FREE REWARDS – TERMS &amp; CONDITIONS</h2>
-          <p>These Terms apply to your use of our website (available at: www.dostt.in) and mobile application (App) (available on Google Play Store and Apple App Store) (collectively, Dostt App) and the “Free Rewards” programme (“Programme”).</p>
+          <p>These Terms apply to your use of our website (available at: www.dostt.in) and mobile application (App) (available on Google Play Store and Apple App Store) (collectively, Dostt App) and the "Free Rewards" programme ("Programme").</p>
           <p class="mt-2">The App is operated by Behtar Technology Private Limited (Company), a company registered in India with its office at 1501, 19th Main, HSR Layout Sector 1, Bangalore, Karnataka – 560102.</p>
           <p class="mt-2">"We", "our" or "us" refers to Behtar Technology Private Limited, and "you" or "your" refers to any user of the Dostt App.</p>
           <p class="mt-2">These Terms must be read together with the Dostt App <a href="https://www.dostt.in/terms" target="_blank" rel="noopener noreferrer" class="text-violet-300 underline">Terms of Use</a>, <a href="https://www.dostt.in/privacypolicy" target="_blank" rel="noopener noreferrer" class="text-violet-300 underline">Privacy Policy</a> &amp; <a href="https://www.dostt.in/guidelines" target="_blank" rel="noopener noreferrer" class="text-violet-300 underline">Community Guidelines</a> (collectively, the Platform Policies). In the event of any inconsistency between these Terms and the Platform Policies, these Terms shall prevail solely with respect to the Programme, to the extent permitted under applicable law. By using this Feature, you confirm that you have read, understood, and accepted these Terms. If you do not agree, please do not participate.</p>
@@ -476,7 +655,7 @@ function termsPage() {
         <section>
           <h2 class="text-sm font-semibold text-white mb-2">3. Earning Dostt Points</h2>
           <p>One (1) Dostt Point is credited for every one (1) coin spent on audio or video calls made through the Dostt App. Points are computed based on your coin spend activity and are displayed within the Programme interface. Points are updated periodically and may reflect activity from up to two (2) hours prior to the time of viewing.</p>
-          <p class="mt-2">The Company’s records relating to coin spend and point accrual shall be final and binding, except in cases of manifest error. Dostt Points have no monetary value. Dostt Points do not constitute property, vested rights, or legally enforceable claims outside the Programme.</p>
+          <p class="mt-2">The Company's records relating to coin spend and point accrual shall be final and binding, except in cases of manifest error. Dostt Points have no monetary value. Dostt Points do not constitute property, vested rights, or legally enforceable claims outside the Programme.</p>
           <p class="mt-2">Dostt Points have no monetary value, cannot be transferred, and cannot be exchanged for cash or any item of value outside the Programme.</p>
         </section>
 
@@ -530,7 +709,7 @@ function termsPage() {
 
         <section>
           <h2 class="text-sm font-semibold text-white mb-2">9. Privacy</h2>
-          <p>Your participation is governed by Dostt’s Privacy Policy. Data related to your spins, rewards, and activity is used solely to operate and improve the Feature and is handled in accordance with applicable laws.</p>
+          <p>Your participation is governed by Dostt's Privacy Policy. Data related to your spins, rewards, and activity is used solely to operate and improve the Feature and is handled in accordance with applicable laws.</p>
         </section>
 
         <section>
@@ -560,49 +739,7 @@ function termsPage() {
   `;
 }
 
-function testModeModal() {
-  return `
-    <div id="test-modal-overlay" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-6">
-      <div class="w-full max-w-sm rounded-2xl bg-[#161d2a] border border-white/10 p-6">
-        <div class="mb-1 flex items-center gap-2">
-          <span class="text-lg">🧪</span>
-          <h2 class="text-base font-semibold text-white">Test Mode</h2>
-        </div>
-        <p class="mb-6 text-xs text-white/50">You're logging in with a test number. Choose how you want to test:</p>
-        <div class="flex flex-col gap-3">
-          <button id="test-api-btn" class="w-full rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 py-3.5 text-sm font-semibold text-white shadow-[0_4px_20px_rgba(139,92,246,0.35)] active:opacity-90">
-            Test via API
-            <p class="text-[11px] font-normal opacity-70 mt-0.5">Hits backend · saves to DB · skips coin credit</p>
-          </button>
-          <button id="test-bypass-btn" class="w-full rounded-xl border border-white/15 bg-white/6 py-3.5 text-sm font-semibold text-white active:opacity-90">
-            Test Offline (Bypass)
-            <p class="text-[11px] font-normal opacity-70 mt-0.5">No API · no DB · resets on logout</p>
-          </button>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function wireTestModal() {
-  document.getElementById("test-api-btn")?.addEventListener("click", async () => {
-    state.testMode = "api";
-    state.showTestModal = false;
-    state.view = "rewards";
-    rewardsRendered = false;
-    await loadRewardsData();
-    render();
-  });
-  document.getElementById("test-bypass-btn")?.addEventListener("click", () => {
-    state.testMode = "bypass";
-    state.showTestModal = false;
-    state.view = "rewards";
-    state.totalSpent = 24350;
-    state.claimed = new Set();
-    rewardsRendered = false;
-    render();
-  });
-}
+// ─── Render ───────────────────────────────────────────────────────────────────
 
 function render() {
   if (state.showTestModal) {
@@ -626,6 +763,12 @@ function render() {
       rewardsRendered = true;
       sweepProgressBar();
     }
+    // Wire tester toolbar claim-type toggle
+    document.getElementById("claim-type-toggle")?.addEventListener("click", () => {
+      state.claimType = state.claimType === "real" ? "dummy" : "real";
+      render();
+      initLottie();
+    });
   }
 }
 
@@ -652,6 +795,8 @@ function sweepProgressBar() {
   });
 }
 
+// ─── Toast ────────────────────────────────────────────────────────────────────
+
 function showToast(text) {
   state.toast = text;
   render();
@@ -672,6 +817,8 @@ function showToast(text) {
   }, 1800);
 }
 
+// ─── Coin burst animation ─────────────────────────────────────────────────────
+
 function spawnCoinsAt(cx, cy, count = 5) {
   const angles = count === 4
     ? [-50, -15, 15, 50]
@@ -687,6 +834,8 @@ function spawnCoinsAt(cx, cy, count = 5) {
     coin.addEventListener("animationend", () => coin.remove(), { once: true });
   });
 }
+
+// ─── Coin audio ───────────────────────────────────────────────────────────────
 
 const _coinAudio = new Audio("assets/Coins dropping in Piggy Bank Sound Effect  Coins Sound Effect.mp3");
 _coinAudio.preload = "auto";
@@ -721,6 +870,8 @@ function playCoinClink() {
   } catch (e) { /* audio not available */ }
 }
 
+// ─── Data loading ─────────────────────────────────────────────────────────────
+
 async function loadRewardsData() {
   if (state.testMode === "bypass") {
     state.totalSpent = 24350;
@@ -729,21 +880,24 @@ async function loadRewardsData() {
   }
   try {
     const data = await api(`/rewards/me?phone=${encodeURIComponent(state.phone)}&countryCode=${encodeURIComponent(state.country.code)}`);
-    state.totalSpent      = data.totalSpent        || 0;
-    state.lastRefreshedAt = data.lastRefreshedAt   || null;
-    state.cycleEndDate    = data.cycle?.endDate    || null;
+    state.totalSpent      = data.totalSpent      || 0;
+    state.lastRefreshedAt = data.lastRefreshedAt  || null;
+    state.cycleEndDate    = data.cycle?.endDate   || null;
     state.claimed         = new Set(data.claimedTiers || []);
+    state.nextClaimAt     = data.nextClaimAt      || null;
+    state.isTester        = data.isTester         || state.isTester;
   } catch (err) {
     console.error("[rewards] Failed to load rewards data:", err.message);
   }
 }
+
+// ─── Event delegation ─────────────────────────────────────────────────────────
 
 window.addEventListener("click", async (event) => {
   const claimButton = event.target.closest(".claim-btn");
   if (claimButton && !claimButton.disabled) {
     const tierId = Number(claimButton.dataset.tier);
 
-    // Optimistically disable to prevent double-tap
     claimButton.disabled = true;
     claimButton.textContent = "Claiming…";
 
@@ -756,23 +910,43 @@ window.addEventListener("click", async (event) => {
     }
 
     try {
-      await api("/rewards/claim", {
+      const result = await api("/rewards/claim", {
         method: "POST",
-        body: JSON.stringify({ tierId, phone: state.phone, countryCode: state.country.code }),
+        body: JSON.stringify({
+          tierId,
+          phone: state.phone,
+          countryCode: state.country.code,
+          claimMode: state.testMode === "direct_select" ? "direct_select" : "api",
+          claimType: state.claimType || "real",
+        }),
       });
+
       state.claimed.add(tierId);
+      if (result.nextClaimAt) {
+        state.nextClaimAt = result.nextClaimAt;
+        startCountdown();
+      }
       playCoinClink();
-      showToast("Coins added to your wallet!");
+      showToast(state.claimType === "dummy" ? "Dummy claim logged!" : "Coins added to your wallet!");
       sweepProgressBar();
     } catch (err) {
-      // Re-enable on failure
-      claimButton.disabled = false;
-      claimButton.textContent = "Claim";
-      showToast(err.message || "Failed to claim. Try again.");
+      // Handle cooldown response (429)
+      if (err.status === 429 && err.data?.nextClaimAt) {
+        state.nextClaimAt = err.data.nextClaimAt;
+        startCountdown();
+        render();
+        initLottie();
+      } else {
+        claimButton.disabled = false;
+        claimButton.textContent = "Claim";
+        showToast(err.message || "Failed to claim. Try again.");
+      }
     }
   }
 
   if (event.target.closest("#logout-btn")) {
+    clearInterval(_countdownInterval);
+    _countdownInterval = null;
     localStorage.removeItem("dostt_session");
     state.view = "login";
     state.phone = "";
@@ -780,8 +954,11 @@ window.addEventListener("click", async (event) => {
     state.claimed = new Set();
     state.totalSpent = 0;
     state.lastRefreshedAt = null;
+    state.isTester = false;
     state.testMode = null;
+    state.claimType = "real";
     state.showTestModal = false;
+    state.nextClaimAt = null;
     rewardsRendered = false;
     render();
   }
@@ -793,7 +970,8 @@ window.addEventListener("click", async (event) => {
   }
 });
 
-// Restore session from localStorage
+// ─── Session restore ──────────────────────────────────────────────────────────
+
 (async function restoreSession() {
   try {
     const saved = localStorage.getItem("dostt_session");
@@ -801,13 +979,16 @@ window.addEventListener("click", async (event) => {
       const s = JSON.parse(saved);
       state.phone   = s.phone   || "";
       state.country = s.country || COUNTRIES[0];
+      state.isTester = TEST_PHONES.includes(state.phone);
       state.view    = "rewards";
       await loadRewardsData();
+      if (state.nextClaimAt) startCountdown();
     }
   } catch (e) { /* ignore */ }
   render();
 })();
 
+// ─── Lottie ───────────────────────────────────────────────────────────────────
 
 function initLottie() {
   const container = document.getElementById("coins-lottie");

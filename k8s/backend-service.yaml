@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dostt-backend-svc
+  namespace: default
+spec:
+  selector:
+    app: dostt-backend
+  ports:
+    - port: 3001
+      targetPort: 3001
+  type: ClusterIP

@@ -1,0 +1,75 @@
+# Reference Postgres StatefulSet — use for local/dev/staging only.
+# In production, use a managed database (AWS RDS, GCP Cloud SQL, etc.)
+# and point DATABASE_URL in the Secret to the managed instance.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dostt-postgres-pvc
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dostt-postgres
+  namespace: default
+spec:
+  serviceName: dostt-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dostt-postgres
+  template:
+    metadata:
+      labels:
+        app: dostt-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: dostt
+            - name: POSTGRES_PASSWORD
+              value: dostt_secret   # Override with a Secret in production
+            - name: POSTGRES_DB
+              value: dostt_rewards
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "dostt"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: dostt-postgres-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dostt-postgres
+  namespace: default
+spec:
+  selector:
+    app: dostt-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+  type: ClusterIP

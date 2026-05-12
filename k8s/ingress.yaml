@@ -1,0 +1,37 @@
+# Requires nginx-ingress-controller installed in the cluster.
+# Install: kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.1/deploy/static/provider/cloud/deploy.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dostt-rewards-ingress
+  namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: rewards.dostt.in   # Replace with your actual domain
+      http:
+        paths:
+          # Backend: /api/* → backend service (strip /api prefix)
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: dostt-backend-svc
+                port:
+                  number: 3001
+          # Frontend: /* → frontend service
+          - path: /()(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: dostt-frontend-svc
+                port:
+                  number: 80
+  # TLS (recommended for production)
+  # tls:
+  #   - hosts:
+  #       - rewards.dostt.in
+  #     secretName: dostt-tls-secret

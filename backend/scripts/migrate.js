@@ -121,8 +121,6 @@ const tables = [
   {
     name: "claim_notifications",
     sql: `
-      -- Audit log of every claim attempt — success or failure.
-      -- Lets ops easily see if coins were credited or if something went wrong.
       CREATE TABLE IF NOT EXISTS claim_notifications (
         id              SERIAL PRIMARY KEY,
         phone           VARCHAR(20)   NOT NULL,
@@ -131,7 +129,6 @@ const tables = [
         cycle_number    INTEGER       NOT NULL,
         coins_awarded   INTEGER,
         status          VARCHAR(20)   NOT NULL DEFAULT 'pending',
-        -- status values: 'pending' | 'success' | 'failed'
         failure_reason  TEXT,
         redash_response JSONB,
         created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW()
@@ -140,6 +137,111 @@ const tables = [
         ON claim_notifications (phone, country_code);
       CREATE INDEX IF NOT EXISTS idx_notif_status
         ON claim_notifications (status);
+    `,
+  },
+  {
+    name: "claim_notifications new columns (safe)",
+    sql: `
+      ALTER TABLE claim_notifications ADD COLUMN IF NOT EXISTS claim_mode    VARCHAR(20);
+      ALTER TABLE claim_notifications ADD COLUMN IF NOT EXISTS claim_type    VARCHAR(20);
+      ALTER TABLE claim_notifications ADD COLUMN IF NOT EXISTS dostt_user_id VARCHAR(100);
+      ALTER TABLE claim_notifications ADD COLUMN IF NOT EXISTS tier_unlock_at INTEGER;
+      ALTER TABLE claim_notifications ADD COLUMN IF NOT EXISTS tier_coins     INTEGER;
+    `,
+  },
+  {
+    name: "users cooldown column (safe)",
+    sql: `
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS next_claim_at TIMESTAMPTZ;
+    `,
+  },
+  {
+    name: "login_logs",
+    sql: `
+      CREATE TABLE IF NOT EXISTS login_logs (
+        id           SERIAL PRIMARY KEY,
+        phone        VARCHAR(20)  NOT NULL,
+        country_code VARCHAR(10)  NOT NULL DEFAULT '+91',
+        user_type    VARCHAR(10)  NOT NULL DEFAULT 'real',
+        status       VARCHAR(10)  NOT NULL,
+        error_reason TEXT,
+        created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_login_logs_phone  ON login_logs (phone);
+      CREATE INDEX IF NOT EXISTS idx_login_logs_status ON login_logs (status);
+    `,
+  },
+  {
+    name: "view: v_waiting_for_cooldown",
+    sql: `
+      CREATE OR REPLACE VIEW v_waiting_for_cooldown AS
+      SELECT u.phone, u.country_code, u.next_claim_at,
+             EXTRACT(EPOCH FROM (u.next_claim_at - NOW()))::INTEGER AS seconds_remaining
+      FROM users u
+      WHERE u.next_claim_at > NOW()
+        AND EXISTS (SELECT 1 FROM user_points up WHERE up.mobile_no = u.phone);
+    `,
+  },
+  {
+    name: "view: v_eligible_not_claimed",
+    sql: `
+      CREATE OR REPLACE VIEW v_eligible_not_claimed AS
+      SELECT DISTINCT u.phone, u.country_code, up.total_spent, up.last_refreshed_at_ist
+      FROM users u
+      JOIN user_points up ON up.mobile_no = u.phone
+      CROSS JOIN (
+        VALUES (1,200),(2,400),(3,700),(4,1000),(5,1400),(6,1900),(7,2500),
+               (8,3200),(9,4000),(10,4900),(11,6100),(12,7600),(13,9600),
+               (14,12100),(15,15350),(16,19350),(17,24350)
+      ) AS tiers(tier_id, unlock_at)
+      WHERE (u.next_claim_at IS NULL OR u.next_claim_at <= NOW())
+        AND up.total_spent >= tiers.unlock_at
+        AND NOT EXISTS (
+          SELECT 1 FROM claimed_rewards cr
+          WHERE cr.phone = u.phone AND cr.tier_id = tiers.tier_id
+        );
+    `,
+  },
+  {
+    name: "view: v_login_logs",
+    sql: `
+      CREATE OR REPLACE VIEW v_login_logs AS
+      SELECT phone, country_code, user_type, status, error_reason, created_at
+      FROM login_logs
+      ORDER BY created_at DESC;
+    `,
+  },
+  {
+    name: "view: v_claim_logs",
+    sql: `
+      CREATE OR REPLACE VIEW v_claim_logs AS
+      SELECT phone, country_code, tier_id, tier_unlock_at, tier_coins,
+             coins_awarded, claim_mode, claim_type, status, failure_reason,
+             dostt_user_id, created_at
+      FROM claim_notifications
+      ORDER BY created_at DESC;
+    `,
+  },
+  {
+    name: "view: v_user_performance",
+    sql: `
+      CREATE OR REPLACE VIEW v_user_performance AS
+      SELECT
+        u.phone,
+        u.country_code,
+        u.next_claim_at,
+        COUNT(DISTINCT ll.id)                                         AS login_attempts,
+        COUNT(DISTINCT ll.id) FILTER (WHERE ll.status = 'success')    AS successful_logins,
+        COUNT(DISTINCT ll.id) FILTER (WHERE ll.status = 'failed')     AS failed_logins,
+        MAX(ll.created_at)    FILTER (WHERE ll.status = 'success')    AS last_login_at,
+        COUNT(DISTINCT cn.id)                                         AS claim_attempts,
+        COUNT(DISTINCT cn.id) FILTER (WHERE cn.status = 'success')    AS successful_claims,
+        COUNT(DISTINCT cn.id) FILTER (WHERE cn.status = 'failed')     AS failed_claims,
+        COALESCE(SUM(cn.coins_awarded) FILTER (WHERE cn.status = 'success'), 0) AS total_coins_claimed
+      FROM users u
+      LEFT JOIN login_logs ll ON ll.phone = u.phone
+      LEFT JOIN claim_notifications cn ON cn.phone = u.phone
+      GROUP BY u.phone, u.country_code, u.next_claim_at;
     `,
   },
 ];

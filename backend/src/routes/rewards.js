@@ -2,10 +2,13 @@ const express = require("express");
 const db = require("../db/client");
 const { runQuery }    = require("../services/redash");
 const { getCycleInfo } = require("../services/cycle");
+const logger = require("../utils/logger");
 
 const router = express.Router();
 
 const TEST_PHONES = ["9500365660"];
+const MAX_TIER_POINTS = 24350; // must match TIER_DATA last entry's unlockAt
+const COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 
 const TIER_DATA = [
   { id: 1,  unlockAt: 200,   coins: 20 },
@@ -27,22 +30,16 @@ const TIER_DATA = [
   { id: 17, unlockAt: 24350, coins: 90 },
 ];
 
-/**
- * Credit coins to the user's Dostt wallet via Redash.
- * Expects REDASH_ADD_COINS_QUERY_ID — a parameterised Redash query, e.g.:
- *   INSERT INTO wallet_transactions (user_id, coins, reason)
- *   VALUES ('{{ dostt_user_id }}', {{ coins }}, 'free_reward_tier_{{ tier_id }}')
- */
 async function creditCoinsViaRedash(dosttUserId, tierId, coins) {
   const queryId = Number(process.env.REDASH_ADD_COINS_QUERY_ID);
   if (!queryId) {
-    console.warn("[rewards] REDASH_ADD_COINS_QUERY_ID not set — skipping coin credit");
+    logger.warn("REDASH_ADD_COINS_QUERY_ID not set — skipping coin credit");
     return null;
   }
   return runQuery(
     queryId,
     { dostt_user_id: dosttUserId, tier_id: tierId, coins },
-    0  // always execute fresh — never use cache for write queries
+    0
   );
 }
 
@@ -51,25 +48,30 @@ router.get("/me", async (req, res) => {
   try {
     const { phone, countryCode = "+91" } = req.query;
     if (!phone) return res.status(400).json({ error: "phone is required" });
+
     const { cycleNumber, cycleStartDate, cycleEndDate } = getCycleInfo();
+    const isTestPhone = TEST_PHONES.includes(phone);
 
-    const points = await db.findOne("user_points", { mobile_no: phone });
-
-    // Only return claims from the current cycle
-    const claimedRows = await db.query(
-      `SELECT tier_id FROM claimed_rewards
-       WHERE phone = $1 AND country_code = $2 AND cycle_number = $3`,
-      [phone, countryCode, cycleNumber]
-    );
+    const [points, claimedRows, user] = await Promise.all([
+      db.findOne("user_points", { mobile_no: phone }),
+      db.query(
+        `SELECT tier_id FROM claimed_rewards
+         WHERE phone = $1 AND country_code = $2 AND cycle_number = $3`,
+        [phone, countryCode, cycleNumber]
+      ),
+      db.findOne("users", { phone, country_code: countryCode }),
+    ]);
 
     res.json({
-      totalSpent:      points ? Number(points.total_spent)   : 0,
+      totalSpent:      isTestPhone ? MAX_TIER_POINTS : (points ? Number(points.total_spent) : 0),
       walletBalance:   points ? Number(points.wallet_balance) : 0,
       spentOnAudio:    points ? Number(points.spent_on_audio) : 0,
       spentOnVideo:    points ? Number(points.spent_on_video) : 0,
-      ltv:             points ? Number(points.ltv)            : 0,
-      lastRefreshedAt: points ? points.last_refreshed_at_ist  : null,
+      ltv:             points ? Number(points.ltv) : 0,
+      lastRefreshedAt: points ? points.last_refreshed_at_ist : null,
       claimedTiers:    claimedRows.map(r => r.tier_id),
+      nextClaimAt:     user?.next_claim_at || null,
+      isTester:        isTestPhone,
       cycle: {
         number:    cycleNumber,
         startDate: cycleStartDate,
@@ -77,25 +79,39 @@ router.get("/me", async (req, res) => {
       },
     });
   } catch (err) {
-    console.error("[rewards] /me error:", err);
+    logger.error("rewards /me error", { err: err.message });
     res.status(500).json({ error: "Failed to fetch rewards" });
   }
 });
 
 // POST /rewards/claim
-// body: { phone, countryCode, tierId }
+// body: { phone, countryCode, tierId, claimMode, claimType }
+//   claimMode: "api" (default) | "direct_select"  — direct_select skips points check (test phones only)
+//   claimType: "real" (default) | "dummy"          — dummy skips Redash (test phones only)
 router.post("/claim", async (req, res) => {
   try {
-    const { phone, countryCode = "+91" } = req.body;
+    const { phone, countryCode = "+91", claimMode = "api", claimType = "real" } = req.body;
     const tierId = Number(req.body.tierId);
+
     if (!phone) return res.status(400).json({ error: "phone is required" });
 
     const tier = TIER_DATA.find(t => t.id === tierId);
-    if (!tier) {
-      return res.status(400).json({ error: "Invalid tierId" });
-    }
+    if (!tier) return res.status(400).json({ error: "Invalid tierId" });
+
+    const isTestPhone = TEST_PHONES.includes(phone);
+    const isDirectSelect = claimMode === "direct_select" && isTestPhone;
+    const isDummy = claimType === "dummy" && isTestPhone;
 
     const { cycleNumber } = getCycleInfo();
+
+    // Guard: 1-hour global cooldown
+    const user = await db.findOne("users", { phone, country_code: countryCode });
+    if (user?.next_claim_at && new Date(user.next_claim_at) > new Date()) {
+      return res.status(429).json({
+        error: "Claim cooldown active. Please wait before claiming again.",
+        nextClaimAt: user.next_claim_at,
+      });
+    }
 
     // Guard: already claimed this cycle?
     const existing = await db.findOne("claimed_rewards", {
@@ -108,10 +124,10 @@ router.post("/claim", async (req, res) => {
       return res.status(409).json({ error: "Already claimed this cycle" });
     }
 
-    // Guard: enough points?
+    // Guard: enough points? (skipped for direct_select test phones)
     const points = await db.findOne("user_points", { mobile_no: phone });
-    const totalSpent = points ? Number(points.total_spent) : 0;
-    if (totalSpent < tier.unlockAt) {
+    const totalSpent = isTestPhone ? MAX_TIER_POINTS : (points ? Number(points.total_spent) : 0);
+    if (!isDirectSelect && totalSpent < tier.unlockAt) {
       return res.status(403).json({
         error: `Not enough Dostt Points. Need ${tier.unlockAt}, have ${totalSpent}.`,
       });
@@ -120,33 +136,38 @@ router.post("/claim", async (req, res) => {
     // Log claim attempt as pending
     const notification = await db.insert("claim_notifications", {
       phone,
-      country_code: countryCode,
-      tier_id: tierId,
-      cycle_number: cycleNumber,
-      coins_awarded: tier.coins,
-      status: "pending",
+      country_code:   countryCode,
+      tier_id:        tierId,
+      tier_unlock_at: tier.unlockAt,
+      tier_coins:     tier.coins,
+      cycle_number:   cycleNumber,
+      coins_awarded:  tier.coins,
+      claim_mode:     claimMode,
+      claim_type:     claimType,
+      dostt_user_id:  points?.user_id || null,
+      status:         "pending",
     });
 
     let redashResponse = null;
     try {
-      if (TEST_PHONES.includes(phone)) {
-        console.log(`[rewards] test number ${phone} — skipping Redash coin credit`);
+      if (isDummy) {
+        logger.info("dummy claim — skipping Redash", { phone, tierId, claimMode });
+      } else if (isTestPhone) {
+        logger.info("test phone — skipping Redash coin credit", { phone, tierId });
       } else {
-        redashResponse = await creditCoinsViaRedash(points ? points.user_id : null, tierId, tier.coins);
+        redashResponse = await creditCoinsViaRedash(points?.user_id || null, tierId, tier.coins);
       }
 
-      // Mark notification success
       await db.update("claim_notifications", { id: notification.id }, {
         status: "success",
         redash_response: redashResponse ? JSON.stringify(redashResponse) : null,
       });
     } catch (redashErr) {
-      // Mark notification failed — do NOT record the claim
       await db.update("claim_notifications", { id: notification.id }, {
         status: "failed",
         failure_reason: redashErr.message,
       });
-      console.error("[rewards] Redash coin credit failed:", redashErr.message);
+      logger.error("Redash coin credit failed", { phone, tierId, err: redashErr.message });
       return res.status(502).json({ error: "Failed to credit coins. Please try again." });
     }
 
@@ -154,16 +175,21 @@ router.post("/claim", async (req, res) => {
     const claimed = await db.insert("claimed_rewards", {
       phone,
       country_code:  countryCode,
-      dostt_user_id: points ? points.user_id : null,
+      dostt_user_id: points?.user_id || null,
       tier_id:       tierId,
       unlock_at:     tier.unlockAt,
       coins_awarded: tier.coins,
       cycle_number:  cycleNumber,
     });
 
-    res.json({ success: true, coinsAwarded: tier.coins, claimed });
+    // Set 1-hour cooldown on the user record
+    const nextClaimAt = new Date(Date.now() + COOLDOWN_MS).toISOString();
+    await db.update("users", { phone, country_code: countryCode }, { next_claim_at: nextClaimAt });
+
+    logger.info("claim success", { phone, tierId, claimMode, claimType, coins: tier.coins });
+    res.json({ success: true, coinsAwarded: tier.coins, nextClaimAt, claimed });
   } catch (err) {
-    console.error("[rewards] /claim error:", err);
+    logger.error("rewards /claim error", { err: err.message });
     res.status(500).json({ error: "Failed to claim reward" });
   }
 });
