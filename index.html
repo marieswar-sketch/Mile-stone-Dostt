@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Dostt Free Rewards</title>
+  <meta name="description" content="Earn free call rewards by spending coins on audio and video calls." />
+  <script src="https://cdn.tailwindcss.com?v=20260414-1"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            dosttBg: "#11161f",
+            dosttCard: "#1a2230",
+            dosttMuted: "#9aa6bc",
+            dosttGold: "#f8b629",
+            dosttGoldSoft: "#ffd86b",
+            dosttOrange: "#ff8c2a",
+          },
+          boxShadow: {
+            soft: "0 10px 30px rgba(0,0,0,0.28)",
+          },
+          keyframes: {
+            floatCoin: {
+              "0%, 100%": { transform: "translateY(0)" },
+              "50%": { transform: "translateY(-6px)" },
+            },
+            popIn: {
+              "0%": { transform: "scale(0.96)", opacity: "0.6" },
+              "100%": { transform: "scale(1)", opacity: "1" },
+            },
+          },
+          animation: {
+            floatCoin: "floatCoin 2.8s ease-in-out infinite",
+            popIn: "popIn 220ms ease-out",
+          },
+        },
+      },
+    };
+  </script>
+  <link rel="stylesheet" href="styles.css?v=20260415-39" />
+</head>
+<body class="bg-dosttBg text-white antialiased">
+  <div id="root"></div>
+  <script type="module" src="./app.js?v=20260415-62"></script>
+</body>
+</html>

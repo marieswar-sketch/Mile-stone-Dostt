@@ -1,0 +1,376 @@
+@font-face {
+  font-family: Poppins;
+  src: url("assets/fonts/Poppins-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: Poppins;
+  src: url("assets/fonts/Poppins-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-display: swap;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  font-family: Poppins, system-ui, -apple-system, sans-serif;
+}
+
+.reward-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.reward-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(151, 112, 255, 0.45);
+}
+
+.reward-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.progress-card {
+  box-shadow: 0 14px 28px rgba(8, 10, 20, 0.35);
+  position: relative;
+  overflow: hidden;
+}
+
+.logo-badge {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  animation: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.logo-badge img {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  image-rendering: auto;
+}
+
+.lottie-wrap {
+  position: absolute;
+  inset: 0;
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+.lottie-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.tier-card {
+  position: relative;
+  display: block;
+  padding: 16px 16px 18px;
+  border-radius: 20px;
+  background: #151d29;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 22px rgba(8, 10, 20, 0.25);
+}
+
+.tier-divider {
+  width: 1px;
+  align-self: stretch;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0),
+    rgba(255, 255, 255, 0.16),
+    rgba(255, 255, 255, 0)
+  );
+  opacity: 0.6;
+}
+
+.bg-noise {
+  background:
+    radial-gradient(90% 120% at 50% -20%, rgba(132, 74, 255, 0.18), transparent 54%),
+    radial-gradient(90% 80% at 100% 10%, rgba(97, 66, 212, 0.12), transparent 58%),
+    linear-gradient(180deg, #11161f 0%, #0e1420 100%);
+}
+
+.animate-floatCoin {
+  animation: floatCoin 3.6s ease-in-out infinite;
+}
+
+.coin-fall-card {
+  position: relative;
+  height: 120px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background:
+    radial-gradient(140% 120% at 10% 10%, rgba(246, 193, 58, 0.2), transparent 55%),
+    radial-gradient(120% 120% at 80% 20%, rgba(132, 74, 255, 0.25), transparent 60%),
+    rgba(26, 34, 48, 0.92);
+  overflow: hidden;
+}
+
+.coin-fall-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.coin-fall {
+  position: absolute;
+  top: -46px;
+  width: 30px;
+  height: 30px;
+  opacity: 0.9;
+  animation: coinFall 3.2s linear infinite;
+}
+
+.coin-fall-1 {
+  left: 14%;
+  animation-delay: 0.2s;
+}
+
+.coin-fall-2 {
+  left: 38%;
+  animation-delay: 0.9s;
+}
+
+.coin-fall-3 {
+  left: 62%;
+  animation-delay: 0.5s;
+}
+
+.coin-fall-4 {
+  left: 82%;
+  animation-delay: 1.5s;
+}
+
+.coin-fall-content {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px;
+}
+
+.coin-hero {
+  width: 58px;
+  height: 58px;
+  animation: floatCoin 2.8s ease-in-out infinite;
+  filter: drop-shadow(0 12px 20px rgba(10, 10, 20, 0.35));
+}
+
+.free-rewards-label {
+  display: inline-block;
+  font-size: 11px;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.65);
+  animation: shimmerText 2.6s ease-in-out infinite;
+}
+
+
+@keyframes floatCoin {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes coinFall {
+  0% {
+    transform: translateY(0px) scale(0.95);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.9;
+  }
+  80% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: translateY(150px) scale(0.88);
+    opacity: 0;
+  }
+}
+
+@keyframes logoBounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes logoBounceHard {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-10px);
+  }
+  45% {
+    transform: translateY(0);
+  }
+  60% {
+    transform: translateY(-6px);
+  }
+  75% {
+    transform: translateY(0);
+  }
+}
+
+.logo-bounce-hard {
+  animation: logoBounceHard 1.4s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+}
+
+@keyframes shimmerText {
+  0%,
+  100% {
+    opacity: 0.55;
+    letter-spacing: 0.28em;
+  }
+  50% {
+    opacity: 1;
+    letter-spacing: 0.38em;
+  }
+}
+
+/* === Login / OTP === */
+
+.otp-box {
+  height: 52px;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.06);
+  caret-color: #a78bfa;
+}
+
+.otp-box:focus {
+  outline: none;
+}
+
+.otp-box::placeholder {
+  -webkit-text-fill-color: transparent;
+}
+
+.country-sheet {
+  animation: slideUp 220ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+/* Coin burst on claim */
+.coin-burst {
+  position: fixed;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  pointer-events: none;
+  z-index: 300;
+  filter: brightness(0.62) saturate(0.85);
+  animation: coinBurst 1.3s ease-out forwards;
+}
+
+@keyframes coinBurst {
+  0%   { opacity: 1;   transform: translate(0, 0) scale(1) rotate(0deg); }
+  60%  { opacity: 0.9; }
+  100% { opacity: 0;   transform: translate(var(--tx, 0px), var(--ty, -60px)) scale(0.3) rotate(var(--rot, 20deg)); }
+}
+
+/* Progress bar zoop */
+.bar-zoop {
+  animation: barZoop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  transform-origin: left center;
+}
+
+@keyframes barZoop {
+  0%   { transform: scaleY(1);   filter: brightness(1); }
+  35%  { transform: scaleY(2);   filter: brightness(1.5); }
+  65%  { transform: scaleY(0.8); filter: brightness(1.1); }
+  100% { transform: scaleY(1);   filter: brightness(1); }
+}
+
+/* === Reward Timeline === */
+
+.tier-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+}
+
+/* Vertical connector line: runs from center of this dot to center of the next */
+.tier-row:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 13px; /* half of 26px dot */
+  top: calc(50% + 13px); /* bottom edge of dot */
+  height: calc(100% + 0.75rem - 26px); /* bottom of this dot to top of next dot */
+  width: 2px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  z-index: 0;
+}
+
+/* Claimed rows get a violet filled line below them */
+.tier-row.is-claimed:not(:last-child)::after {
+  background: linear-gradient(180deg, rgba(139, 92, 246, 0.7), rgba(139, 92, 246, 0.18));
+}
+
+.tier-indicator {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  position: relative;
+  z-index: 1;
+}
+
+.tier-dot-claimed {
+  background: linear-gradient(135deg, #7c3aed, #a855f7);
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.25), 0 0 12px rgba(139, 92, 246, 0.5);
+}
+
+.tier-dot-claimable {
+  border: 2.5px solid #a78bfa;
+  background: rgba(139, 92, 246, 0.2);
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.18), 0 0 14px rgba(167, 139, 250, 0.4);
+  animation: pulseGlow 2s ease-in-out infinite;
+}
+
+.tier-dot-locked {
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  background: transparent;
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.15), 0 0 10px rgba(167, 139, 250, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(167, 139, 250, 0.28), 0 0 18px rgba(167, 139, 250, 0.55);
+  }
+}

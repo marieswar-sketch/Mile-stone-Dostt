@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Dostt coin">
+  <defs>
+    <radialGradient id="outerGlow" cx="30%" cy="30%" r="70%">
+      <stop offset="0" stop-color="#ffe88a"/>
+      <stop offset="0.6" stop-color="#f6c13a"/>
+      <stop offset="1" stop-color="#e0a21b"/>
+    </radialGradient>
+  </defs>
+  <circle cx="100" cy="100" r="92" fill="url(#outerGlow)"/>
+  <circle cx="100" cy="100" r="78" fill="#f5bd2c"/>
+  <circle cx="100" cy="100" r="72" fill="#f9d35a"/>
+  <path d="M64 94c0-13 10-24 26-32 10-5 24-7 38-6 5 0 8 4 6 9-7 20-7 36 0 56 2 5-1 9-6 9-14 1-28-1-38-6-16-8-26-19-26-30z" fill="#ffe982"/>
+</svg>
