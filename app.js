@@ -48,12 +48,8 @@ const API_BASE = "http://localhost:3001";
 const DEMO_PHONE = "9988818731";
 
 async function api(path, options = {}) {
-  const token = localStorage.getItem("dostt_token");
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
+    headers: { "Content-Type": "application/json" },
     ...options,
   });
   const data = await res.json();
@@ -62,7 +58,7 @@ async function api(path, options = {}) {
 }
 
 const state = {
-  view: "login",      // "login" | "otp" | "rewards" | "terms"
+  view: "login",      // "login" | "rewards" | "terms"
   prevView: "login",
   phone: "",
   country: COUNTRIES[0],
@@ -75,8 +71,6 @@ const state = {
   toast: "",
   loading: false,
 };
-let otpTimer = null;
-let otpCountdown = 60;
 
 const root = document.getElementById("root");
 
@@ -141,13 +135,11 @@ function loginPage() {
           />
         </div>
 
-        <p class="mb-5 text-center text-xs text-dosttMuted">You will receive an OTP on this number.</p>
-
         <button
           id="login-btn"
           class="w-full rounded-2xl bg-gradient-to-r from-violet-500 to-fuchsia-500 py-4 text-sm font-semibold text-white shadow-[0_4px_20px_rgba(139,92,246,0.45)] active:opacity-90 transition-opacity"
         >
-          Login using SMS
+          Login
         </button>
       </div>
     </div>
@@ -155,96 +147,6 @@ function loginPage() {
   `;
 }
 
-function otpPage() {
-  const secs = String(otpCountdown % 60).padStart(2, "0");
-  const mins = String(Math.floor(otpCountdown / 60)).padStart(2, "0");
-  return `
-    <div class="mx-auto flex h-[100svh] w-full max-w-md flex-col bg-noise px-6">
-      <div class="flex flex-1 flex-col justify-center">
-        <div class="mb-10 flex flex-col items-center gap-3">
-          <img src="assets/dostt_icon.png" alt="Dostt" class="h-16 w-16 object-contain" />
-          <span class="text-[2rem] font-semibold leading-none tracking-tight">dostt</span>
-        </div>
-
-        <h1 class="mb-2 text-center text-[1.3rem] font-semibold leading-snug tracking-tight">
-          Enter OTP
-        </h1>
-        <p class="mb-8 text-center text-sm text-dosttMuted">
-          OTP sent via SMS to ${state.country.code}&nbsp;${state.phone}
-          <button id="edit-phone-btn" class="ml-1 inline-flex items-center text-violet-400" aria-label="Edit phone number">
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M9.5 1.5a1.414 1.414 0 0 1 2 2L4 11H2v-2L9.5 1.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
-          </button>
-        </p>
-
-        <div class="mb-6 flex justify-center gap-3" id="otp-boxes">
-          ${[0,1,2,3,4,5].map(i => `
-            <input
-              id="otp-${i}"
-              type="text"
-              inputmode="numeric"
-              maxlength="1"
-              class="otp-box w-11 rounded-xl border border-white/15 text-center font-semibold outline-none focus:border-violet-400/70 transition-colors"
-              autocomplete="one-time-code"
-              style="font-size:1.2rem"
-            />
-          `).join("")}
-        </div>
-
-        <div class="mb-6 flex items-center justify-center gap-2 text-dosttMuted text-xs">
-          <svg class="animate-spin" width="13" height="13" viewBox="0 0 13 13" fill="none">
-            <circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" stroke-width="1.5" stroke-dasharray="12 22" />
-          </svg>
-          Auto-fetching OTP…
-        </div>
-
-        <button
-          id="verify-btn"
-          class="w-full rounded-2xl bg-gradient-to-r from-violet-500 to-fuchsia-500 py-4 text-sm font-semibold text-white shadow-[0_4px_20px_rgba(139,92,246,0.45)] active:opacity-90 transition-opacity mb-4"
-        >
-          Verify OTP
-        </button>
-
-        <p id="otp-countdown" class="text-center text-xs text-dosttMuted">
-          ${otpCountdown > 0
-            ? `Didn't receive the OTP? Retry in <span class="text-white font-semibold">${mins}:${secs}</span>`
-            : `<button id="resend-btn" class="text-violet-400 font-semibold">Resend OTP</button>`
-          }
-        </p>
-      </div>
-    </div>
-  `;
-}
-
-function startOtpTimer() {
-  clearInterval(otpTimer);
-  otpCountdown = 59;
-  otpTimer = setInterval(() => {
-    otpCountdown -= 1;
-    if (otpCountdown <= 0) {
-      clearInterval(otpTimer);
-      otpCountdown = 0;
-    }
-    // Re-render only the countdown text to avoid losing focus
-    const countdownEl = document.getElementById("otp-countdown");
-    if (countdownEl) {
-      const secs = String(otpCountdown % 60).padStart(2, "0");
-      const mins = String(Math.floor(otpCountdown / 60)).padStart(2, "0");
-      if (otpCountdown > 0) {
-        countdownEl.innerHTML = `Didn't receive the OTP? Retry in <span class="text-white font-semibold">${mins}:${secs}</span>`;
-      } else {
-        countdownEl.innerHTML = `<button id="resend-btn" class="text-violet-400 font-semibold">Resend OTP</button>`;
-        wireOtpEvents();
-      }
-    }
-  }, 1000);
-}
-
-function getOtpValue() {
-  return [0,1,2,3,4,5].map(i => {
-    const el = document.getElementById(`otp-${i}`);
-    return el ? el.value : "";
-  }).join("");
-}
 
 function wireLoginEvents() {
   const loginBtn = document.getElementById("login-btn");
@@ -256,29 +158,35 @@ function wireLoginEvents() {
     if (phone.length < 7) { input.focus(); return; }
 
     state.phone = phone;
+
     // Demo bypass — skip API for the hardcoded demo number
     if (phone === DEMO_PHONE) {
-      state.view = "otp";
+      localStorage.setItem("dostt_session", JSON.stringify({ phone, country: state.country }));
+      state.view = "rewards";
+      state.totalSpent = 200;
+      state.claimed = new Set();
+      rewardsRendered = false;
       render();
-      startOtpTimer();
       return;
     }
 
     loginBtn.disabled = true;
-    loginBtn.textContent = "Sending OTP…";
+    loginBtn.textContent = "Logging in…";
 
     try {
-      await api("/auth/send-otp", {
+      const data = await api("/auth/login", {
         method: "POST",
         body: JSON.stringify({ phone, countryCode: state.country.code }),
       });
-      state.view = "otp";
+      localStorage.setItem("dostt_session", JSON.stringify({ phone, country: state.country }));
+      state.view = "rewards";
+      rewardsRendered = false;
+      await loadRewardsData();
       render();
-      startOtpTimer();
     } catch (err) {
       showLoginError(err.message);
       loginBtn.disabled = false;
-      loginBtn.textContent = "Login using SMS";
+      loginBtn.textContent = "Login";
     }
   });
 
@@ -354,115 +262,6 @@ function showLoginError(msg) {
   err.textContent = msg;
 }
 
-function wireOtpEvents() {
-  // OTP box auto-advance
-  [0,1,2,3,4,5].forEach(i => {
-    const box = document.getElementById(`otp-${i}`);
-    if (!box) return;
-    box.addEventListener("input", (e) => {
-      const val = e.target.value.replace(/\D/g, "");
-      e.target.value = val.slice(-1);
-      if (val && i < 5) document.getElementById(`otp-${i+1}`)?.focus();
-    });
-    box.addEventListener("keydown", (e) => {
-      if (e.key === "Backspace" && !box.value && i > 0) {
-        document.getElementById(`otp-${i-1}`)?.focus();
-      }
-    });
-  });
-
-  const verifyBtn = document.getElementById("verify-btn");
-  if (verifyBtn) {
-    verifyBtn.addEventListener("click", async () => {
-      const otp = getOtpValue();
-      if (otp.length < 6) {
-        showOtpError("Please enter the 6-digit OTP.");
-        return;
-      }
-
-      // Demo bypass — accept any 6-digit OTP for the demo number
-      if (state.phone === DEMO_PHONE) {
-        clearInterval(otpTimer);
-        localStorage.setItem("dostt_session", JSON.stringify({ phone: state.phone, country: state.country }));
-        state.view = "rewards";
-        state.totalSpent = 200;
-        state.claimed = new Set();
-        rewardsRendered = false;
-        render();
-        return;
-      }
-
-      verifyBtn.disabled = true;
-      verifyBtn.textContent = "Verifying…";
-
-      try {
-        const data = await api("/auth/verify-otp", {
-          method: "POST",
-          body: JSON.stringify({
-            phone: state.phone,
-            countryCode: state.country.code,
-            otp,
-          }),
-        });
-
-        clearInterval(otpTimer);
-        localStorage.setItem("dostt_token", data.token);
-        localStorage.setItem("dostt_session", JSON.stringify({ phone: state.phone, country: state.country }));
-
-        state.view = "rewards";
-        rewardsRendered = false;
-        await loadRewardsData();
-        render();
-      } catch (err) {
-        showOtpError(err.message);
-        verifyBtn.disabled = false;
-        verifyBtn.textContent = "Verify OTP";
-      }
-    });
-  }
-
-  const editBtn = document.getElementById("edit-phone-btn");
-  if (editBtn) {
-    editBtn.addEventListener("click", () => {
-      clearInterval(otpTimer);
-      state.view = "login";
-      render();
-      wireLoginEvents();
-    });
-  }
-
-  const resendBtn = document.getElementById("resend-btn");
-  if (resendBtn) {
-    resendBtn.addEventListener("click", async () => {
-      try {
-        await api("/auth/send-otp", {
-          method: "POST",
-          body: JSON.stringify({ phone: state.phone, countryCode: state.country.code }),
-        });
-      } catch (err) {
-        showOtpError(err.message);
-        return;
-      }
-      startOtpTimer();
-      render();
-      wireOtpEvents();
-    });
-  }
-
-  // Focus first box
-  document.getElementById("otp-0")?.focus();
-}
-
-function showOtpError(msg) {
-  let err = document.getElementById("otp-error");
-  if (!err) {
-    err = document.createElement("p");
-    err.id = "otp-error";
-    err.className = "mt-3 text-center text-xs text-red-400";
-    document.getElementById("verify-btn").insertAdjacentElement("afterend", err);
-  }
-  err.textContent = msg;
-}
 
 function nextThreshold(totalSpent) {
   const next = TIER_DATA.find((t) => totalSpent < t.unlockAt);
@@ -767,9 +566,6 @@ function render() {
   if (state.view === "login") {
     root.innerHTML = loginPage();
     wireLoginEvents();
-  } else if (state.view === "otp") {
-    root.innerHTML = otpPage();
-    wireOtpEvents();
   } else if (state.view === "terms") {
     root.innerHTML = termsPage();
     document.getElementById("terms-back-btn")?.addEventListener("click", () => {
@@ -880,7 +676,7 @@ function playCoinClink() {
 
 async function loadRewardsData() {
   try {
-    const data = await api("/rewards/me");
+    const data = await api(`/rewards/me?phone=${encodeURIComponent(state.phone)}&countryCode=${encodeURIComponent(state.country.code)}`);
     state.totalSpent      = data.totalSpent        || 0;
     state.lastRefreshedAt = data.lastRefreshedAt   || null;
     state.cycleEndDate    = data.cycle?.endDate    || null;
@@ -911,7 +707,7 @@ window.addEventListener("click", async (event) => {
     try {
       await api("/rewards/claim", {
         method: "POST",
-        body: JSON.stringify({ tierId }),
+        body: JSON.stringify({ tierId, phone: state.phone, countryCode: state.country.code }),
       });
       state.claimed.add(tierId);
       playCoinClink();
@@ -927,7 +723,6 @@ window.addEventListener("click", async (event) => {
 
   if (event.target.closest("#logout-btn")) {
     localStorage.removeItem("dostt_session");
-    localStorage.removeItem("dostt_token");
     state.view = "login";
     state.phone = "";
     state.country = COUNTRIES[0];
@@ -949,8 +744,7 @@ window.addEventListener("click", async (event) => {
 (async function restoreSession() {
   try {
     const saved = localStorage.getItem("dostt_session");
-    const token = localStorage.getItem("dostt_token");
-    if (saved && (token || JSON.parse(saved).phone === DEMO_PHONE)) {
+    if (saved) {
       const s = JSON.parse(saved);
       state.phone   = s.phone   || "";
       state.country = s.country || COUNTRIES[0];

@@ -1,6 +1,5 @@
 const express = require("express");
 const db = require("../db/client");
-const { requireAuth } = require("../middleware/auth");
 const { runQuery }    = require("../services/redash");
 const { getCycleInfo } = require("../services/cycle");
 
@@ -45,11 +44,11 @@ async function creditCoinsViaRedash(dosttUserId, tierId, coins) {
   );
 }
 
-// GET /rewards/me
-// Returns user's full point breakdown and claimed tier IDs for the current cycle.
-router.get("/me", requireAuth, async (req, res) => {
+// GET /rewards/me?phone=...&countryCode=...
+router.get("/me", async (req, res) => {
   try {
-    const { phone, countryCode } = req.user;
+    const { phone, countryCode = "+91" } = req.query;
+    if (!phone) return res.status(400).json({ error: "phone is required" });
     const { cycleNumber, cycleStartDate, cycleEndDate } = getCycleInfo();
 
     const points = await db.findOne("user_points", { mobile_no: phone });
@@ -82,11 +81,12 @@ router.get("/me", requireAuth, async (req, res) => {
 });
 
 // POST /rewards/claim
-// body: { tierId }
-router.post("/claim", requireAuth, async (req, res) => {
+// body: { phone, countryCode, tierId }
+router.post("/claim", async (req, res) => {
   try {
-    const { phone, countryCode, userId } = req.user;
+    const { phone, countryCode = "+91" } = req.body;
     const tierId = Number(req.body.tierId);
+    if (!phone) return res.status(400).json({ error: "phone is required" });
 
     const tier = TIER_DATA.find(t => t.id === tierId);
     if (!tier) {
@@ -127,7 +127,7 @@ router.post("/claim", requireAuth, async (req, res) => {
 
     let redashResponse = null;
     try {
-      redashResponse = await creditCoinsViaRedash(userId, tierId, tier.coins);
+      redashResponse = await creditCoinsViaRedash(points ? points.user_id : null, tierId, tier.coins);
 
       // Mark notification success
       await db.update("claim_notifications", { id: notification.id }, {
