@@ -66,13 +66,14 @@ const adapter = {
     const cols   = keys.join(", ");
     const placeholders = keys.map((_, i) => `$${i + 1}`).join(", ");
     const conflict = conflictColumns.join(", ");
-    const updates  = keys
-      .filter(k => !conflictColumns.includes(k))
-      .map(k => `${k} = EXCLUDED.${k}`)
-      .join(", ");
+    const updateKeys = keys.filter(k => !conflictColumns.includes(k));
+    const updates = updateKeys.map(k => `${k} = EXCLUDED.${k}`).join(", ");
+    const onConflict = updates
+      ? `DO UPDATE SET ${updates}`
+      : `DO NOTHING`;
     const sql = `
       INSERT INTO ${table} (${cols}) VALUES (${placeholders})
-      ON CONFLICT (${conflict}) DO UPDATE SET ${updates}
+      ON CONFLICT (${conflict}) ${onConflict}
       RETURNING *
     `;
     const rows = await adapter.query(sql, values);

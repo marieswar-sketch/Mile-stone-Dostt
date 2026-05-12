@@ -45,7 +45,6 @@ const COUNTRIES = [
 ];
 
 const API_BASE = "http://localhost:3001";
-const DEMO_PHONE = "9988818731";
 
 async function api(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -56,6 +55,8 @@ async function api(path, options = {}) {
   if (!res.ok) throw new Error(data.error || "Request failed");
   return data;
 }
+
+const TEST_PHONES = ["9500365660"];
 
 const state = {
   view: "login",      // "login" | "rewards" | "terms"
@@ -70,6 +71,8 @@ const state = {
   claimed: new Set(),
   toast: "",
   loading: false,
+  testMode: null,        // null | "api" | "bypass"
+  showTestModal: false,
 };
 
 const root = document.getElementById("root");
@@ -159,17 +162,6 @@ function wireLoginEvents() {
 
     state.phone = phone;
 
-    // Demo bypass — skip API for the hardcoded demo number
-    if (phone === DEMO_PHONE) {
-      localStorage.setItem("dostt_session", JSON.stringify({ phone, country: state.country }));
-      state.view = "rewards";
-      state.totalSpent = 200;
-      state.claimed = new Set();
-      rewardsRendered = false;
-      render();
-      return;
-    }
-
     loginBtn.disabled = true;
     loginBtn.textContent = "Logging in…";
 
@@ -179,10 +171,16 @@ function wireLoginEvents() {
         body: JSON.stringify({ phone, countryCode: state.country.code }),
       });
       localStorage.setItem("dostt_session", JSON.stringify({ phone, country: state.country }));
-      state.view = "rewards";
-      rewardsRendered = false;
-      await loadRewardsData();
-      render();
+      if (TEST_PHONES.includes(phone)) {
+        state.testMode = null;
+        state.showTestModal = true;
+        render();
+      } else {
+        state.view = "rewards";
+        rewardsRendered = false;
+        await loadRewardsData();
+        render();
+      }
     } catch (err) {
       showLoginError(err.message);
       loginBtn.disabled = false;
@@ -562,7 +560,56 @@ function termsPage() {
   `;
 }
 
+function testModeModal() {
+  return `
+    <div id="test-modal-overlay" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-6">
+      <div class="w-full max-w-sm rounded-2xl bg-[#161d2a] border border-white/10 p-6">
+        <div class="mb-1 flex items-center gap-2">
+          <span class="text-lg">🧪</span>
+          <h2 class="text-base font-semibold text-white">Test Mode</h2>
+        </div>
+        <p class="mb-6 text-xs text-white/50">You're logging in with a test number. Choose how you want to test:</p>
+        <div class="flex flex-col gap-3">
+          <button id="test-api-btn" class="w-full rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-500 py-3.5 text-sm font-semibold text-white shadow-[0_4px_20px_rgba(139,92,246,0.35)] active:opacity-90">
+            Test via API
+            <p class="text-[11px] font-normal opacity-70 mt-0.5">Hits backend · saves to DB · skips coin credit</p>
+          </button>
+          <button id="test-bypass-btn" class="w-full rounded-xl border border-white/15 bg-white/6 py-3.5 text-sm font-semibold text-white active:opacity-90">
+            Test Offline (Bypass)
+            <p class="text-[11px] font-normal opacity-70 mt-0.5">No API · no DB · resets on logout</p>
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function wireTestModal() {
+  document.getElementById("test-api-btn")?.addEventListener("click", async () => {
+    state.testMode = "api";
+    state.showTestModal = false;
+    state.view = "rewards";
+    rewardsRendered = false;
+    await loadRewardsData();
+    render();
+  });
+  document.getElementById("test-bypass-btn")?.addEventListener("click", () => {
+    state.testMode = "bypass";
+    state.showTestModal = false;
+    state.view = "rewards";
+    state.totalSpent = 24350;
+    state.claimed = new Set();
+    rewardsRendered = false;
+    render();
+  });
+}
+
 function render() {
+  if (state.showTestModal) {
+    root.innerHTML = testModeModal();
+    wireTestModal();
+    return;
+  }
   if (state.view === "login") {
     root.innerHTML = loginPage();
     wireLoginEvents();
@@ -675,6 +722,11 @@ function playCoinClink() {
 }
 
 async function loadRewardsData() {
+  if (state.testMode === "bypass") {
+    state.totalSpent = 24350;
+    state.claimed = new Set();
+    return;
+  }
   try {
     const data = await api(`/rewards/me?phone=${encodeURIComponent(state.phone)}&countryCode=${encodeURIComponent(state.country.code)}`);
     state.totalSpent      = data.totalSpent        || 0;
@@ -691,18 +743,17 @@ window.addEventListener("click", async (event) => {
   if (claimButton && !claimButton.disabled) {
     const tierId = Number(claimButton.dataset.tier);
 
-    // Demo bypass — no API needed for demo number
-    if (state.phone === DEMO_PHONE) {
+    // Optimistically disable to prevent double-tap
+    claimButton.disabled = true;
+    claimButton.textContent = "Claiming…";
+
+    if (state.testMode === "bypass") {
       state.claimed.add(tierId);
       playCoinClink();
       showToast("Coins added to your wallet!");
       sweepProgressBar();
       return;
     }
-
-    // Optimistically disable to prevent double-tap
-    claimButton.disabled = true;
-    claimButton.textContent = "Claiming…";
 
     try {
       await api("/rewards/claim", {
@@ -729,6 +780,8 @@ window.addEventListener("click", async (event) => {
     state.claimed = new Set();
     state.totalSpent = 0;
     state.lastRefreshedAt = null;
+    state.testMode = null;
+    state.showTestModal = false;
     rewardsRendered = false;
     render();
   }
@@ -749,8 +802,7 @@ window.addEventListener("click", async (event) => {
       state.phone   = s.phone   || "";
       state.country = s.country || COUNTRIES[0];
       state.view    = "rewards";
-      if (state.phone !== DEMO_PHONE) await loadRewardsData();
-      else state.totalSpent = 200;
+      await loadRewardsData();
     }
   } catch (e) { /* ignore */ }
   render();

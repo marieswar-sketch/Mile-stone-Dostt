@@ -5,6 +5,8 @@ const { getCycleInfo } = require("../services/cycle");
 
 const router = express.Router();
 
+const TEST_PHONES = ["9500365660"];
+
 const TIER_DATA = [
   { id: 1,  unlockAt: 200,   coins: 20 },
   { id: 2,  unlockAt: 400,   coins: 20 },
@@ -127,7 +129,11 @@ router.post("/claim", async (req, res) => {
 
     let redashResponse = null;
     try {
-      redashResponse = await creditCoinsViaRedash(points ? points.user_id : null, tierId, tier.coins);
+      if (TEST_PHONES.includes(phone)) {
+        console.log(`[rewards] test number ${phone} — skipping Redash coin credit`);
+      } else {
+        redashResponse = await creditCoinsViaRedash(points ? points.user_id : null, tierId, tier.coins);
+      }
 
       // Mark notification success
       await db.update("claim_notifications", { id: notification.id }, {

@@ -4,6 +4,8 @@ const { runQuery } = require("../services/redash");
 
 const router = express.Router();
 
+const TEST_PHONES = ["9500365660"];
+
 async function lookupDosttUser(phone) {
   const queryId = Number(process.env.REDASH_VERIFY_PHONE_QUERY_ID);
   if (!queryId) return null;
@@ -21,9 +23,11 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ error: "Invalid phone number" });
     }
 
-    const dosttUser = await lookupDosttUser(phone);
-    if (process.env.REDASH_VERIFY_PHONE_QUERY_ID && !dosttUser) {
-      return res.status(403).json({ error: "Please use your Dostt registered number" });
+    if (!TEST_PHONES.includes(phone)) {
+      const dosttUser = await lookupDosttUser(phone);
+      if (process.env.REDASH_VERIFY_PHONE_QUERY_ID && !dosttUser) {
+        return res.status(403).json({ error: "Please use your Dostt registered number" });
+      }
     }
 
     await db.upsert(
