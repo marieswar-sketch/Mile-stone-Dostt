@@ -27,9 +27,5 @@ app.listen(PORT, () => {
     otpProvider: process.env.OTP_PROVIDER || "twilio",
   });
 
-  if (process.env.GOOGLE_SHEETS_ID) {
-    startSyncJob();
-  } else {
-    logger.warn("GOOGLE_SHEETS_ID not set — sheet sync disabled");
-  }
+  logger.info("points fetched per-user from Redash — sheet sync disabled");
 });

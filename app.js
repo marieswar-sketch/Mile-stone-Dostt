@@ -112,6 +112,7 @@ function startCountdown() {
 }
 
 function secsUntilClaim() {
+  if (state.isTester) return 0; // testers always skip cooldown
   if (!state.nextClaimAt) return 0;
   return Math.max(0, Math.ceil((new Date(state.nextClaimAt) - Date.now()) / 1000));
 }
@@ -374,30 +375,35 @@ function wireTestModal() {
 }
 
 // ─── Tester toolbar (shown on rewards page when isTester) ────────────────────
+// Combined single-row bar: mode label + claim type toggle + cooldown timer if active
 
 function testerToolbar() {
   const modeLabel = {
-    api: "API Mode",
+    api: "API",
     direct_select: "Direct Select",
-    bypass: "Offline Bypass",
+    bypass: "Bypass",
   }[state.testMode] || "?";
 
   const isDummy = state.claimType === "dummy";
+  const countdown = cooldownLabel();
 
   return `
-    <div class="mx-3 mt-3 rounded-2xl border border-amber-400/30 bg-amber-400/8 px-4 py-2.5 flex items-center gap-3 flex-wrap">
-      <span class="text-xs font-semibold text-amber-300">🧪 Tester</span>
-      <span class="text-xs text-white/50 border-r border-white/15 pr-3">${modeLabel}</span>
-      <div class="flex items-center gap-2 ml-auto">
-        <span class="text-xs text-white/50">Claim:</span>
-        <button id="claim-type-toggle"
-          class="rounded-full px-3 py-1 text-xs font-semibold transition-colors ${isDummy
-            ? "bg-amber-400/20 text-amber-300 border border-amber-400/40"
-            : "bg-violet-500/20 text-violet-300 border border-violet-400/40"
-          }">
-          ${isDummy ? "Dummy" : "Real"}
-        </button>
-      </div>
+    <div class="mx-3 mt-2 rounded-xl border border-amber-400/30 bg-amber-400/8 px-3 py-1.5 flex items-center gap-2">
+      <span class="text-[11px] font-semibold text-amber-300 shrink-0">🧪 ${modeLabel}</span>
+      <span class="text-white/20 shrink-0">|</span>
+      <span class="text-[11px] text-white/50 shrink-0">Claim:</span>
+      <button id="claim-type-toggle"
+        class="rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition-colors shrink-0 ${isDummy
+          ? "bg-amber-400/20 text-amber-300 border border-amber-400/40"
+          : "bg-violet-500/20 text-violet-300 border border-violet-400/40"
+        }">
+        ${isDummy ? "Dummy" : "Real"}
+      </button>
+      ${countdown ? `
+        <span class="text-white/20 shrink-0 ml-auto">|</span>
+        <svg width="11" height="11" viewBox="0 0 14 14" fill="none" class="shrink-0 text-white/40"><circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.3"/><path d="M7 4v3l2 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        <span class="text-[11px] text-white/50 shrink-0">Next: <span class="cooldown-timer font-semibold text-white/70">${countdown}</span></span>
+      ` : ""}
     </div>
   `;
 }
@@ -510,16 +516,17 @@ function rewardsPage() {
   const displayed = Math.min(effectiveTotalSpent, target);
   const ratio = Math.min((effectiveTotalSpent / target) * 100, 100);
 
-  const cooldownBanner = secsUntilClaim() > 0 ? `
-    <div class="mx-3 mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 flex items-center gap-2.5">
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" class="shrink-0 text-white/50"><circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.3"/><path d="M7 4v3l2 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
-      <p class="text-xs text-white/60">Next claim available in <span class="cooldown-timer font-semibold text-white/80">${cooldownLabel()}</span></p>
+  // Cooldown banner for real users (testers see it in the toolbar instead)
+  const cooldownBanner = !state.isTester && secsUntilClaim() > 0 ? `
+    <div class="mx-3 mt-2 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 flex items-center gap-2">
+      <svg width="11" height="11" viewBox="0 0 14 14" fill="none" class="shrink-0 text-white/40"><circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.3"/><path d="M7 4v3l2 2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      <p class="text-[11px] text-white/60">Next claim in <span class="cooldown-timer font-semibold text-white/80">${cooldownLabel()}</span></p>
     </div>
   ` : "";
 
   return `
     <div class="mx-auto w-full max-w-md h-[100svh] overflow-y-auto bg-noise">
-      <div class="flex h-[100svh] flex-col">
+      <div class="flex min-h-[100svh] flex-col">
       <header class="relative px-4 pt-5 pb-3 shrink-0">
         <div class="flex items-center gap-3">
           <img src="assets/dostt_icon.png" alt="Dostt" class="h-11 w-11 rounded-2xl" />
@@ -581,7 +588,7 @@ function rewardsPage() {
         </div>
       </section>
 
-      <section class="mx-3 mt-4 mb-2 min-h-0 flex-1 flex flex-col">
+      <section class="mx-3 mt-4 mb-2 flex flex-col" style="flex:1 1 0;min-height:clamp(280px,40vh,500px)">
         <div class="flex min-h-0 flex-1 flex-col rounded-3xl border border-white/10 bg-[#1a2230] shadow-soft overflow-hidden">
           <div class="px-4 pt-4 pb-2 shrink-0">
             <h2 class="text-base font-semibold">Free Rewards</h2>
@@ -884,8 +891,8 @@ async function loadRewardsData() {
     state.lastRefreshedAt = data.lastRefreshedAt  || null;
     state.cycleEndDate    = data.cycle?.endDate   || null;
     state.claimed         = new Set(data.claimedTiers || []);
-    state.nextClaimAt     = data.nextClaimAt      || null;
     state.isTester        = data.isTester         || state.isTester;
+    state.nextClaimAt     = state.isTester ? null : (data.nextClaimAt || null);
   } catch (err) {
     console.error("[rewards] Failed to load rewards data:", err.message);
   }

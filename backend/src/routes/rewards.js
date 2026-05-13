@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../db/client");
 const { runQuery }    = require("../services/redash");
 const { getCycleInfo } = require("../services/cycle");
+const { creditCoins } = require("../services/dosttWallet");
 const logger = require("../utils/logger");
 
 const router = express.Router();
@@ -30,17 +31,41 @@ const TIER_DATA = [
   { id: 17, unlockAt: 24350, coins: 90 },
 ];
 
-async function creditCoinsViaRedash(dosttUserId, tierId, coins) {
-  const queryId = Number(process.env.REDASH_ADD_COINS_QUERY_ID);
-  if (!queryId) {
-    logger.warn("REDASH_ADD_COINS_QUERY_ID not set — skipping coin credit");
-    return null;
+async function getOrRefreshPoints(phone) {
+  const TWO_HOURS = 2 * 60 * 60 * 1000;
+  const cached = await db.findOne("user_points", { mobile_no: phone });
+
+  if (cached && cached.synced_at && (Date.now() - new Date(cached.synced_at)) < TWO_HOURS) {
+    return cached;
   }
-  return runQuery(
-    queryId,
-    { dostt_user_id: dosttUserId, tier_id: tierId, coins },
-    0
-  );
+
+  const queryId = Number(process.env.REDASH_USER_POINTS_QUERY_ID);
+  if (!queryId) return cached;
+
+  let rows;
+  try {
+    rows = await runQuery(queryId, { phone }, 0);
+  } catch (err) {
+    logger.warn("Redash points fetch failed, using cached data", { phone, err: err.message });
+    return cached;
+  }
+
+  if (!rows || !rows.length) return cached;
+
+  const r = rows[0];
+  await db.upsert("user_points", {
+    user_id:               r.user_id               || null,
+    mobile_no:             phone,
+    wallet_balance:        Number(r.wallet_balance)  || 0,
+    spent_on_audio:        Number(r.spent_on_audio)  || 0,
+    spent_on_video:        Number(r.spent_on_video)  || 0,
+    total_spent:           Number(r.total_spent)      || 0,
+    last_refreshed_at_ist: r.last_refreshed_at_ist   || null,
+    ltv:                   Number(r.ltv)              || 0,
+    synced_at:             new Date(),
+  }, ["mobile_no"]);
+
+  return db.findOne("user_points", { mobile_no: phone });
 }
 
 // GET /rewards/me?phone=...&countryCode=...
@@ -53,7 +78,7 @@ router.get("/me", async (req, res) => {
     const isTestPhone = TEST_PHONES.includes(phone);
 
     const [points, claimedRows, user] = await Promise.all([
-      db.findOne("user_points", { mobile_no: phone }),
+      getOrRefreshPoints(phone),
       db.query(
         `SELECT tier_id FROM claimed_rewards
          WHERE phone = $1 AND country_code = $2 AND cycle_number = $3`,
@@ -104,9 +129,9 @@ router.post("/claim", async (req, res) => {
 
     const { cycleNumber } = getCycleInfo();
 
-    // Guard: 1-hour global cooldown
+    // Guard: 1-hour global cooldown (skipped for test phones)
     const user = await db.findOne("users", { phone, country_code: countryCode });
-    if (user?.next_claim_at && new Date(user.next_claim_at) > new Date()) {
+    if (!isTestPhone && user?.next_claim_at && new Date(user.next_claim_at) > new Date()) {
       return res.status(429).json({
         error: "Claim cooldown active. Please wait before claiming again.",
         nextClaimAt: user.next_claim_at,
@@ -125,7 +150,7 @@ router.post("/claim", async (req, res) => {
     }
 
     // Guard: enough points? (skipped for direct_select test phones)
-    const points = await db.findOne("user_points", { mobile_no: phone });
+    const points = await getOrRefreshPoints(phone);
     const totalSpent = isTestPhone ? MAX_TIER_POINTS : (points ? Number(points.total_spent) : 0);
     if (!isDirectSelect && totalSpent < tier.unlockAt) {
       return res.status(403).json({
@@ -151,11 +176,11 @@ router.post("/claim", async (req, res) => {
     let redashResponse = null;
     try {
       if (isDummy) {
-        logger.info("dummy claim — skipping Redash", { phone, tierId, claimMode });
+        logger.info("dummy claim — skipping wallet credit", { phone, tierId, claimMode });
       } else if (isTestPhone) {
-        logger.info("test phone — skipping Redash coin credit", { phone, tierId });
+        logger.info("test phone — skipping wallet credit", { phone, tierId });
       } else {
-        redashResponse = await creditCoinsViaRedash(points?.user_id || null, tierId, tier.coins);
+        redashResponse = await creditCoins(points?.user_id || null, tierId, tier.coins);
       }
 
       await db.update("claim_notifications", { id: notification.id }, {
